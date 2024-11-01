@@ -6,10 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:launch_at_startup/launch_at_startup.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 Future<void> initSystemTray() async {
   String path =
-      Platform.isWindows ? 'assets/images/icon.icon' : 'assets/images/icon.png';
+      Platform.isWindows ? 'assets/images/icon.ico' : 'assets/images/icon.ico';
 
   final AppWindow appWindow = AppWindow();
   final SystemTray systemTray = SystemTray();
@@ -44,13 +46,24 @@ Future<void> initSystemTray() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  PackageInfo packageInfo = await PackageInfo.fromPlatform();
 
-  await windowManager.ensureInitialized();
+  launchAtStartup.setup(
+    appName: packageInfo.appName,
+    appPath: Platform.resolvedExecutable,
+    // Set packageName parameter to support MSIX.
+    packageName: 'blaze',
+  );
+
+  await launchAtStartup.enable();
+  await launchAtStartup.disable();
+  bool isEnabled = await launchAtStartup.isEnabled();
   await initSystemTray();
+  await windowManager.ensureInitialized();
 
   windowManager.waitUntilReadyToShow().then((_) async {
-    await DesktopWindow.setWindowSize(Size(800, 500));
-    await windowManager.setMinimumSize(Size(800, 500));
+    await DesktopWindow.setWindowSize(const Size(800, 500));
+    await windowManager.setMinimumSize(const Size(800, 500));
     await windowManager.show();
     await windowManager.focus();
   });

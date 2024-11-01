@@ -4,6 +4,7 @@ class Download {
   int totalBytes;
   String status;
   bool isDownloading;
+  String filePath;
 
   Download({
     required this.url,
@@ -11,9 +12,9 @@ class Download {
     this.totalBytes = 0,
     this.status = 'Ready',
     this.isDownloading = false,
+    required this.filePath,
   });
 
-  // Convert a Download object to a JSON map
   Map<String, dynamic> toJson() {
     return {
       'url': url,
@@ -21,10 +22,10 @@ class Download {
       'totalBytes': totalBytes,
       'status': status,
       'isDownloading': isDownloading,
+      'filePath': filePath,
     };
   }
 
-  // Create a Download object from a JSON map
   factory Download.fromJson(Map<String, dynamic> json) {
     return Download(
       url: json['url'],
@@ -32,6 +33,7 @@ class Download {
       totalBytes: json['totalBytes'] ?? 0,
       status: json['status'] ?? 'Ready',
       isDownloading: json['isDownloading'] ?? false,
+      filePath: json['filePath'],
     );
   }
 }

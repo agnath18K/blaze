@@ -8,7 +8,6 @@ import 'package:blaze_engine/blaze_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:dbus/dbus.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -56,7 +55,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  void startDownload(String url, int maxRetries, bool forceDownload) {
+  void startDownload(String url, int maxRetries, bool forceDownload) async {
     if (url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -65,8 +64,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
+    final Directory? downloadsDir = await getDownloadsDirectory();
+    if (downloadsDir == null)
+      return; // Handle case where downloads directory isn't available
+
+    final filePath = '${downloadsDir.path}/${Uri.parse(url).pathSegments.last}';
+
     setState(() {
-      downloads.add(Download(url: url));
+      downloads.add(Download(url: url, filePath: filePath));
     });
 
     _downloadFile(downloads.last);
@@ -74,7 +79,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _downloadFile(Download download) async {
-    final Directory? downloadsDir = await getDownloadsDirectory();
     setState(() {
       download.isDownloading = true;
       download.status = 'Starting download...';
@@ -83,29 +87,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final downloader = SequentialDownload(
       allowResume: true,
       downloadUrl: download.url,
-      destinationPath: downloadsDir!.path,
+      destinationPath: download.filePath,
       onProgress: (double progress) {
         setState(() {
           current_progress = progress;
-          download.status = 'Downloading... ${(progress).toStringAsFixed(0)}%';
+          download.status =
+              'Downloading... ${(progress / 100).toStringAsFixed(0)}%';
         });
       },
       onComplete: (String filePath) {
         showGnomeNotification(
-            "Download Complete", "Your file has been successfully downloaded!");
+            "Download Complete", "File downloaded to $filePath");
 
         setState(() {
           download.isDownloading = false;
           download.status = 'Download complete!';
         });
-        _saveDownloads(); // Save after download completes
+        _saveDownloads();
       },
       onError: (String error) {
         setState(() {
           download.isDownloading = false;
           download.status = 'Error: $error';
         });
-        _saveDownloads(); // Save if an error occurs
+        _saveDownloads();
       },
     );
 
@@ -119,23 +124,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _deleteDownload(int index) async {
+    bool deleteFileFromSystem = false;
+
     final bool? confirmDelete = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('Delete Download'),
-          content: const Text('Are you sure you want to delete this download?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Are you sure you want to delete this download?'),
+              const SizedBox(height: 10),
+              StatefulBuilder(
+                builder: (context, setState) {
+                  return CheckboxListTile(
+                    title: const Text('Delete file from system'),
+                    value: deleteFileFromSystem,
+                    onChanged: (value) {
+                      setState(() {
+                        deleteFileFromSystem = value ?? false;
+                      });
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(false); // Cancel deletion
-              },
+              onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(true); // Confirm deletion
-              },
+              onPressed: () => Navigator.of(context).pop(true),
               child: const Text('Delete'),
             ),
           ],
@@ -143,8 +165,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       },
     );
 
-    // If confirmed, delete the item
     if (confirmDelete == true) {
+      final download = downloads[index];
+      if (deleteFileFromSystem) {
+        try {
+          final file = File(download.filePath);
+          if (await file.exists()) {
+            await file.delete();
+          }
+        } catch (e) {
+          print("Error deleting file from system: $e");
+        }
+      }
+
       setState(() {
         downloads.removeAt(index);
       });
@@ -216,7 +249,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         builder: (context) => const SettingsPage()),
                   ); // Push the SettingsPage onto the stack
                 },
-                icon: Icon(Icons.menu)),
+                icon: const Icon(Icons.menu)),
           )
         ],
       ),
@@ -257,10 +290,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           value: current_progress / 100,
                                         ),
                                         const SizedBox(height: 4),
-                                        Text(
-                                            'Downloaded: ${download.downloadedBytes} bytes'),
-                                        Text(
-                                            'Total: ${download.totalBytes} bytes'),
                                       ],
                                     ],
                                   ),
