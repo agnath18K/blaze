@@ -1,0 +1,17 @@
+flutter_app: 
+  command: blaze
+  arch: x64
+  parent: /usr/local/lib
+  nonInteractive: true
+
+control:
+  Package: blaze
+  Version: 1.0.0
+  Architecture: amd64
+  Priority: optional
+  Depends:
+  Maintainer: agnath18
+  Description: Download Manager
+
+options:
+ exec_out_dir: debian/packages

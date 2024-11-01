@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0.0
+Name=blaze
+GenericName=blaze
+Comment=Download Manager
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=Flutter;
+Icon=blaze

@@ -11,7 +11,9 @@ class EmptyDownloadsScreen extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Lottie.asset(
-              'assets/animations/empty.json'), // Path to your Lottie file
+            'assets/animations/empty.json',
+            height: 200,
+          ), // Path to your Lottie file
           const SizedBox(height: 20),
           const Text(
             'No Downloads Available',

@@ -1,7 +1,14 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:blaze/download_model.dart';
 import 'package:blaze/empty_downloads_screen.dart';
-import 'package:blaze/main.dart';
-import 'package:blaze_engine/blaze_downloader.dart';
+import 'package:blaze/settings_page.dart';
+import 'package:blaze_engine/blaze_engine.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dbus/dbus.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -11,70 +18,138 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  Future<void> showGnomeNotification(String title, String message) async {
+    try {
+      await Process.run('notify-send', [title, message]);
+    } catch (e) {
+      print("Error showing notification: $e");
+    }
+  }
+
+  double current_progress = 0;
   final List<Download> downloads = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDownloads();
+  }
+
+  // Save downloads to SharedPreferences
+  Future<void> _saveDownloads() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String> downloadJsonList =
+        downloads.map((download) => jsonEncode(download.toJson())).toList();
+    await prefs.setStringList('downloads', downloadJsonList);
+  }
+
+  // Load downloads from SharedPreferences on startup
+  Future<void> _loadDownloads() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String>? downloadJsonList = prefs.getStringList('downloads');
+
+    if (downloadJsonList != null) {
+      setState(() {
+        downloads.addAll(downloadJsonList.map(
+            (downloadJson) => Download.fromJson(jsonDecode(downloadJson))));
+      });
+    }
+  }
 
   void startDownload(String url, int maxRetries, bool forceDownload) {
     if (url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid URL and file path.')),
+        const SnackBar(
+            content: Text('Please enter a valid URL and file path.')),
       );
       return;
     }
 
     setState(() {
-      downloads.add(Download(
-        url: url,
-        maxRetries: maxRetries,
-        forceDownload: forceDownload,
-      ));
+      downloads.add(Download(url: url));
     });
 
     _downloadFile(downloads.last);
+    _saveDownloads(); // Save updated downloads list
   }
 
-  void _downloadFile(Download download) {
+  void _downloadFile(Download download) async {
+    final Directory? downloadsDir = await getDownloadsDirectory();
     setState(() {
       download.isDownloading = true;
       download.status = 'Starting download...';
     });
 
-    final downloader = BlazeDownloader(
-      download.url,
-      maxRetries: download.maxRetries,
-      forceDownload: download.forceDownload,
-      onProgress: (int downloaded, int total) {
+    final downloader = SequentialDownload(
+      allowResume: true,
+      downloadUrl: download.url,
+      destinationPath: downloadsDir!.path,
+      onProgress: (double progress) {
         setState(() {
-          download.downloadedBytes = downloaded;
-          download.totalBytes = total;
-          download.status =
-              'Downloading... ${((downloaded / total) * 100).toStringAsFixed(0)}%';
+          current_progress = progress;
+          download.status = 'Downloading... ${(progress).toStringAsFixed(0)}%';
         });
       },
-      onStatusChange: (String newStatus) {
-        setState(() {
-          download.status = newStatus;
-        });
-      },
-      onDownloadComplete: () {
+      onComplete: (String filePath) {
+        showGnomeNotification(
+            "Download Complete", "Your file has been successfully downloaded!");
+
         setState(() {
           download.isDownloading = false;
           download.status = 'Download complete!';
         });
+        _saveDownloads(); // Save after download completes
+      },
+      onError: (String error) {
+        setState(() {
+          download.isDownloading = false;
+          download.status = 'Error: $error';
+        });
+        _saveDownloads(); // Save if an error occurs
       },
     );
 
-    downloader.download().catchError((error) {
+    downloader.startDownload().catchError((error) {
       setState(() {
         download.isDownloading = false;
         download.status = 'Error: $error';
       });
+      _saveDownloads();
     });
   }
 
-  void _deleteDownload(int index) {
-    setState(() {
-      downloads.removeAt(index);
-    });
+  void _deleteDownload(int index) async {
+    final bool? confirmDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete Download'),
+          content: const Text('Are you sure you want to delete this download?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(false); // Cancel deletion
+              },
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(true); // Confirm deletion
+              },
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    // If confirmed, delete the item
+    if (confirmDelete == true) {
+      setState(() {
+        downloads.removeAt(index);
+      });
+      _saveDownloads(); // Save updated list after deletion
+    }
   }
 
   void _showDownloadDialog() {
@@ -101,56 +176,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   },
                 ),
                 const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Max Retries:'),
-                        DropdownButton<int>(
-                          value: maxRetries,
-                          items: [1, 2, 3, 4, 5]
-                              .map((value) => DropdownMenuItem<int>(
-                                    value: value,
-                                    child: Text(value.toString()),
-                                  ))
-                              .toList(),
-                          onChanged: (value) {
-                            if (value != null) {
-                              maxRetries = value;
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        const Text('Force Download:'),
-                        Switch(
-                          value: forceDownload,
-                          onChanged: (value) {
-                            forceDownload = value;
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
               ],
             ),
           ),
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.of(context).pop(); // Close the dialog
+                Navigator.of(context).pop();
               },
               child: const Text('Cancel'),
             ),
             ElevatedButton(
               onPressed: () {
                 startDownload(url, maxRetries, forceDownload);
-                Navigator.of(context).pop(); // Close the dialog
+                Navigator.of(context).pop();
               },
               child: const Text('Start Download'),
             ),
@@ -166,6 +205,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text('Blaze Download Manager'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: IconButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const SettingsPage()),
+                  ); // Push the SettingsPage onto the stack
+                },
+                icon: Icon(Icons.menu)),
+          )
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -201,10 +254,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       Text('Status: ${download.status}'),
                                       if (download.isDownloading) ...[
                                         LinearProgressIndicator(
-                                          value: download.totalBytes > 0
-                                              ? download.downloadedBytes /
-                                                  download.totalBytes
-                                              : null,
+                                          value: current_progress / 100,
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
@@ -226,8 +276,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           : Colors.green,
                                     ),
                                     IconButton(
-                                      icon:
-                                          const Icon(Icons.delete, color: Colors.red),
+                                      icon: const Icon(Icons.delete,
+                                          color: Colors.red),
                                       onPressed: () => _deleteDownload(index),
                                     ),
                                   ],
